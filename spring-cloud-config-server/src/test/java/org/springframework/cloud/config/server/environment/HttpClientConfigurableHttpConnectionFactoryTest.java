@@ -100,6 +100,36 @@ public class HttpClientConfigurableHttpConnectionFactoryTest {
 	}
 
 	@Test
+	public void applicationNameAlsoOccursInBaseURL() throws Exception {
+		MultipleJGitEnvironmentProperties properties = new MultipleJGitEnvironmentProperties();
+		properties.setUri("http://server.com/{placeholder}-test.git");
+		this.connectionFactory.addConfiguration(properties);
+
+		HttpConnection actualConnection = this.connectionFactory
+			.create(new URL("http://server.com/server-test.git" + "/some/path.properties"));
+
+		HttpClientBuilder expectedHttpClientBuilder = this.connectionFactory.httpClientBuildersByUri.values().stream()
+			.findFirst().get();
+		HttpClientBuilder actualHttpClientBuilder = getActualHttpClientBuilder(actualConnection);
+		assertThat(actualHttpClientBuilder).isSameAs(expectedHttpClientBuilder);
+	}
+
+	@Test
+	public void applicationNameAlsoOccursLaterInPath() throws Exception {
+		MultipleJGitEnvironmentProperties properties = new MultipleJGitEnvironmentProperties();
+		properties.setUri("http://localhost/{placeholder}-testval.git");
+		this.connectionFactory.addConfiguration(properties);
+
+		HttpConnection actualConnection = this.connectionFactory
+			.create(new URL("http://localhost/val-testval.git" + "/some/path.properties"));
+
+		HttpClientBuilder expectedHttpClientBuilder = this.connectionFactory.httpClientBuildersByUri.values().stream()
+			.findFirst().get();
+		HttpClientBuilder actualHttpClientBuilder = getActualHttpClientBuilder(actualConnection);
+		assertThat(actualHttpClientBuilder).isSameAs(expectedHttpClientBuilder);
+	}
+
+	@Test
 	public void urlWithPlaceholdersAtEnd() throws Exception {
 		MultipleJGitEnvironmentProperties properties = new MultipleJGitEnvironmentProperties();
 		properties.setUri("https://localhost/v1/repos/pvvts_configs-{application}");

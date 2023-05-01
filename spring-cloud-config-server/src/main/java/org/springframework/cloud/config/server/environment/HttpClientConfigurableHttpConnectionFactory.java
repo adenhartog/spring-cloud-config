@@ -22,21 +22,16 @@ import java.net.URL;
 import java.security.GeneralSecurityException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.http.impl.client.HttpClientBuilder;
 import org.eclipse.jgit.transport.http.HttpConnection;
 import org.eclipse.jgit.transport.http.apache.HttpClientConnection;
-
 import org.springframework.cloud.config.server.support.HttpClient4Support;
-import org.springframework.util.ObjectUtils;
 
 import static java.util.stream.Collectors.toMap;
 
@@ -89,20 +84,8 @@ public class HttpClientConfigurableHttpConnectionFactory implements Configurable
 
 	private HttpClientBuilder lookupHttpClientBuilder(final URL url) {
 		Map<String, HttpClientBuilder> builderMap = this.httpClientBuildersByUri.entrySet().stream().filter(entry -> {
-			String key = entry.getKey();
-			String spec = getUrlWithPlaceholders(url, key);
-			if (spec.equals(key)) {
-				return true;
-			}
-			int index = spec.lastIndexOf("/");
-			while (index != -1) {
-				spec = spec.substring(0, index);
-				if (spec.equals(key)) {
-					return true;
-				}
-				index = spec.lastIndexOf("/");
-			}
-			return false;
+			var uriPattern = UriTemplate.parse(entry.getKey());
+			return uriPattern.matcher(url.toString()).matches();
 		}).collect(toMap(Map.Entry::getKey, Map.Entry::getValue));
 
 		if (builderMap.isEmpty()) {
@@ -131,48 +114,66 @@ public class HttpClientConfigurableHttpConnectionFactory implements Configurable
 		return new ArrayList<>(builderMap.values()).get(0);
 	}
 
-	private String getUrlWithPlaceholders(URL url, String key) {
-		String spec = url.toString();
-		String[] tokens = key.split(PLACEHOLDER_PATTERN_STRING);
-		// if token[0] equals url then there was no placeholder in the the url, so
-		// matching needed
-		if (tokens.length >= 1 && !tokens[0].equals(url.toString())) {
-			List<String> placeholders = getPlaceholders(key);
-			List<String> values = getValues(spec, tokens);
-			if (placeholders.size() == values.size()) {
-				for (int i = 0; i < values.size(); i++) {
-					spec = spec.replace(values.get(i), String.format("{%s}", placeholders.get(i)));
+	// Extract from: org.springframework.web.util.UriTemplate
+	private static final class UriTemplate {
+
+		private UriTemplate() {
+		}
+
+		public static Pattern parse(String uriTemplate) {
+			int level = 0;
+			StringBuilder pattern = new StringBuilder();
+			StringBuilder builder = new StringBuilder();
+
+			for (int i = 0; i < uriTemplate.length(); ++i) {
+				char c = uriTemplate.charAt(i);
+				if (c == '{') {
+					++level;
+					if (level == 1) {
+						pattern.append(quote(builder));
+						builder = new StringBuilder();
+						continue;
+					}
+				} else if (c == '}') {
+					--level;
+					if (level == 0) {
+						String variable = builder.toString();
+						int idx = variable.indexOf(58);
+						if (idx == -1) {
+							pattern.append("([^/]*)");
+						} else {
+							if (idx + 1 == variable.length()) {
+								throw new IllegalArgumentException("No custom regular expression specified after ':' in \"" + variable + "\"");
+							}
+
+							String regex = variable.substring(idx + 1);
+							pattern.append('(');
+							pattern.append(regex);
+							pattern.append(')');
+						}
+
+						builder = new StringBuilder();
+						continue;
+					}
 				}
-			}
-		}
-		return spec;
-	}
 
-	private List<String> getValues(String spec, String[] tokens) {
-		List<String> values = new LinkedList<>();
-		for (String token : tokens) {
-			String[] valueTokens = spec.split(token);
-			if (!ObjectUtils.isEmpty(valueTokens[0])) {
-				values.add(valueTokens[0]);
+				builder.append(c);
 			}
-			if (valueTokens.length > 1) {
-				spec = valueTokens[1];
+
+			if (builder.length() > 0) {
+				pattern.append(quote(builder));
 			}
-		}
-		if (tokens.length == 1 && !ObjectUtils.isEmpty(spec)) {
-			values.add(spec);
-		}
-		return values;
-	}
 
-	private List<String> getPlaceholders(String key) {
-		Pattern pattern = Pattern.compile(PLACEHOLDER_PATTERN_STRING);
-		Matcher matcher = pattern.matcher(key);
-		List<String> placeholders = new LinkedList<>();
-		while (matcher.find()) {
-			placeholders.add(matcher.group(1));
-		}
-		return placeholders;
-	}
+			// trailing path or query string should not be relevant
+			pattern.append(".*");
 
+			return Pattern.compile(pattern.toString());
+		}
+
+		private static String quote(StringBuilder builder) {
+			return builder.length() > 0 ? Pattern.quote(builder.toString()) : "";
+		}
+	}
 }
+
+
